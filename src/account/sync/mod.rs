@@ -1082,7 +1082,7 @@ impl SyncedAccount {
         drop(account_);
 
         log::debug!(
-            "[TRANSFER] inputs: {:#?} - remainder address: {:?}",
+            "[TRANSFER] tx inputs: {:#?} - remainder address: {:?}",
             input_addresses,
             remainder_address
         );
