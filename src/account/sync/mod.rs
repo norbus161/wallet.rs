@@ -29,23 +29,12 @@ use iota::{
 };
 use serde::Serialize;
 use slip10::BIP32Path;
-use tokio::{
-    sync::{mpsc::channel, MutexGuard},
-    time::sleep,
-};
+use tokio::sync::MutexGuard;
 
-use std::{
-    collections::HashSet,
-    convert::TryInto,
-    num::NonZeroU64,
-    sync::{Arc, Mutex},
-    thread,
-    time::Duration,
-};
+use std::{collections::HashSet, convert::TryInto, num::NonZeroU64};
 
 mod input_selection;
 
-const OUTPUT_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 const DUST_ALLOWANCE_VALUE: u64 = 1_000_000;
 
 async fn get_address_outputs(
@@ -1019,47 +1008,6 @@ impl SyncedAccount {
         if value > balance.total {
             return Err(crate::Error::InsufficientFunds);
         }
-
-        let available_balance = balance.available;
-        drop(account_);
-
-        // if the transfer value exceeds the account's available balance,
-        // wait for an account update or sync it with the tangle
-        if value > available_balance {
-            let (tx, mut rx) = channel(1);
-            let tx = Arc::new(Mutex::new(tx));
-
-            let account_handle = self.account_handle.clone();
-            thread::spawn(move || {
-                let tx = tx.lock().unwrap();
-                for _ in 1..30 {
-                    thread::sleep(OUTPUT_LOCK_TIMEOUT / 30);
-                    let account = crate::block_on(async { account_handle.read().await });
-                    // the account received an update and now the balance is sufficient
-                    if value <= account.balance().available {
-                        let _ = tx.send(());
-                        break;
-                    }
-                }
-            });
-
-            let delay = sleep(Duration::from_millis(50));
-            tokio::pin!(delay);
-            tokio::select! {
-                v = rx.recv() => {
-                    if v.is_none() {
-                        // if we got an error waiting for the account update, we try to sync it
-                        self.account_handle.sync().await.execute().await?;
-                    }
-                }
-                _ = &mut delay => {
-                    // if we got a timeout waiting for the account update, we try to sync it
-                    self.account_handle.sync().await.execute().await?;
-                }
-            }
-        }
-
-        let account_ = self.account_handle.read().await;
 
         if let RemainderValueStrategy::AccountAddress(ref remainder_deposit_address) =
             transfer_obj.remainder_value_strategy
